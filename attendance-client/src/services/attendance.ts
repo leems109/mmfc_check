@@ -9,24 +9,6 @@ export type CheckInRecord = {
   created_at: string
 }
 
-export type AllowedUser = {
-  name: string
-}
-
-export async function fetchAllowedUsers(): Promise<AllowedUser[]> {
-  if (!supabase) {
-    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
-  }
-
-  const { data, error } = await supabase.from('mmfc_allowed').select('name').order('name')
-
-  if (error) {
-    throw new Error(error.message ?? '허용된 사용자 목록을 불러오는 중 오류가 발생했습니다.')
-  }
-
-  return data ?? []
-}
-
 export async function checkIn({ userName }: CheckInPayload) {
   if (!supabase) {
     throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
@@ -61,5 +43,37 @@ export async function fetchTodayCheckIns(): Promise<CheckInRecord[]> {
   }
 
   return data ?? []
+}
+
+export async function fetchGateState(): Promise<boolean> {
+  if (!supabase) {
+    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
+  }
+
+  const { data, error } = await supabase
+    .from('mmfc_admin_gate')
+    .select('is_active')
+    .eq('id', 1)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message ?? '출석 허용 상태를 불러오는 중 오류가 발생했습니다.')
+  }
+
+  return data?.is_active ?? false
+}
+
+export async function updateGateState(isActive: boolean): Promise<void> {
+  if (!supabase) {
+    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
+  }
+
+  const { error } = await supabase
+    .from('mmfc_admin_gate')
+    .upsert({ id: 1, is_active: isActive }, { onConflict: 'id' })
+
+  if (error) {
+    throw new Error(error.message ?? '출석 허용 상태를 저장하는 중 오류가 발생했습니다.')
+  }
 }
 
