@@ -1,14 +1,45 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { DragEvent, FormEvent } from 'react'
 import './App.css'
 import {
   checkIn,
   fetchAttendanceByYear,
+  fetchFormationAssignments,
   fetchGateState,
   fetchTodayCheckIns,
+  resetFormationAssignments,
   updateGateState,
+  upsertFormationAssignment,
   type CheckInRecord,
 } from './services/attendance'
+
+type FormationSlot = {
+  id: string
+  label: string
+  row: number
+  column: number
+}
+
+type FormationSlotState = FormationSlot & {
+  player: string | null
+}
+
+const FORMATION_TEMPLATE: FormationSlot[] = [
+  { id: 'slot-lw', label: 'LW', row: 1, column: 2 },
+  { id: 'slot-st', label: 'ST', row: 1, column: 3 },
+  { id: 'slot-rw', label: 'RW', row: 1, column: 4 },
+  { id: 'slot-lcm', label: 'LCM', row: 2, column: 2 },
+  { id: 'slot-cm', label: 'CM', row: 2, column: 3 },
+  { id: 'slot-rcm', label: 'RCM', row: 2, column: 4 },
+  { id: 'slot-lb', label: 'LB', row: 3, column: 1 },
+  { id: 'slot-lcb', label: 'LCB', row: 3, column: 2 },
+  { id: 'slot-rcb', label: 'RCB', row: 3, column: 4 },
+  { id: 'slot-rb', label: 'RB', row: 3, column: 5 },
+  { id: 'slot-gk', label: 'GK', row: 4, column: 3 },
+]
+
+const PLAYER_DATA_KEY = 'application/x-formation-player'
+const SLOT_DATA_KEY = 'application/x-formation-slot'
 
 const ADMIN_CREDENTIALS = {
   username: 'admin',
@@ -30,6 +61,14 @@ function App() {
   const [isAdminAuthed, setIsAdminAuthed] = useState(false)
   const [adminError, setAdminError] = useState('')
   const [showAdminLogin, setShowAdminLogin] = useState(false)
+  const [formationSlots, setFormationSlots] = useState<FormationSlotState[]>(() =>
+    FORMATION_TEMPLATE.map((slot) => ({ ...slot, player: null })),
+  )
+  const [benchPlayers, setBenchPlayers] = useState<string[]>([])
+  const [showFormation, setShowFormation] = useState(false)
+  const [formationLoading, setFormationLoading] = useState(false)
+  const [formationSaving, setFormationSaving] = useState(false)
+  const [formationError, setFormationError] = useState('')
   const currentYear = new Date().getFullYear()
   const yearOptions = useMemo(
     () => Array.from({ length: 6 }, (_, index) => currentYear - index),
@@ -56,6 +95,13 @@ function App() {
       hour12: false,
     })
   }, [])
+
+  const attendeeNames = useMemo(() => {
+    const names = checkIns
+      .map((record) => record.name?.trim())
+      .filter((name): name is string => Boolean(name))
+    return Array.from(new Set(names))
+  }, [checkIns])
 
   const loadGateState = useCallback(async () => {
     if (!supabaseReady) {
@@ -222,6 +268,176 @@ function App() {
       setGateLoading(false)
     }
   }
+
+  const updateBenchPlayers = useCallback(
+    (slots: FormationSlotState[]) => {
+      const assignedNames = slots
+        .map((slot) => slot.player)
+        .filter((name): name is string => Boolean(name))
+      setBenchPlayers(attendeeNames.filter((name) => !assignedNames.includes(name)))
+    },
+    [attendeeNames],
+  )
+
+  const loadFormation = useCallback(async () => {
+    if (!supabaseReady) {
+      return
+    }
+    setFormationLoading(true)
+    setFormationError('')
+    try {
+      const assignments = await fetchFormationAssignments()
+      setFormationSlots(() => {
+        const map = new Map(assignments.map((item) => [item.slot_id, item.player_name]))
+        const nextSlots = FORMATION_TEMPLATE.map((slot) => ({
+          ...slot,
+          player: map.get(slot.id) ?? null,
+        }))
+        updateBenchPlayers(nextSlots)
+        return nextSlots
+      })
+    } catch (error) {
+      console.error(error)
+      if (error instanceof Error) {
+        setFormationError(error.message)
+      } else {
+        setFormationError('포메이션 정보를 불러오는 중 알 수 없는 오류가 발생했습니다.')
+      }
+    } finally {
+      setFormationLoading(false)
+    }
+  }, [supabaseReady, updateBenchPlayers])
+
+  useEffect(() => {
+    void loadFormation()
+  }, [loadFormation])
+
+  const handleAssignPlayer = useCallback(
+    async (slotId: string, playerName: string) => {
+      if (!attendeeNames.includes(playerName)) {
+        return
+      }
+
+      setFormationSlots((prevSlots) => {
+        const updatedSlots = prevSlots.map((slot) => {
+          if (slot.id === slotId) {
+            return { ...slot, player: playerName }
+          }
+          if (slot.player === playerName && slot.id !== slotId) {
+            return { ...slot, player: null }
+          }
+          return slot
+        })
+        updateBenchPlayers(updatedSlots)
+        return updatedSlots
+      })
+      setFormationSaving(true)
+      setFormationError('')
+      try {
+        await upsertFormationAssignment(slotId, playerName)
+      } catch (error) {
+        console.error(error)
+        if (error instanceof Error) {
+          setFormationError(error.message)
+        } else {
+          setFormationError('포지션을 저장하는 중 알 수 없는 오류가 발생했습니다.')
+        }
+        void loadFormation()
+      } finally {
+        setFormationSaving(false)
+      }
+    },
+    [attendeeNames, updateBenchPlayers, loadFormation],
+  )
+
+  const handleClearSlot = useCallback(
+    async (slotId: string) => {
+      setFormationSlots((prevSlots) => {
+        const updatedSlots = prevSlots.map((slot) =>
+          slot.id === slotId ? { ...slot, player: null } : slot,
+        )
+        updateBenchPlayers(updatedSlots)
+        return updatedSlots
+      })
+      setFormationSaving(true)
+      setFormationError('')
+      try {
+        await upsertFormationAssignment(slotId, null)
+      } catch (error) {
+        console.error(error)
+        if (error instanceof Error) {
+          setFormationError(error.message)
+        } else {
+          setFormationError('포지션을 초기화하는 중 알 수 없는 오류가 발생했습니다.')
+        }
+        void loadFormation()
+      } finally {
+        setFormationSaving(false)
+      }
+    },
+    [updateBenchPlayers, loadFormation],
+  )
+
+  const handlePlayerDragStart = useCallback(
+    (event: DragEvent<HTMLElement>, playerName: string, slotId?: string) => {
+      event.dataTransfer.setData(PLAYER_DATA_KEY, playerName)
+      if (slotId) {
+        event.dataTransfer.setData(SLOT_DATA_KEY, slotId)
+      }
+      event.dataTransfer.effectAllowed = 'move'
+    },
+    [],
+  )
+
+  const handleSlotDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>, slotId: string) => {
+      event.preventDefault()
+      if (formationSaving) {
+        return
+      }
+      const playerName = event.dataTransfer.getData(PLAYER_DATA_KEY)
+      if (!playerName) {
+        return
+      }
+      void handleAssignPlayer(slotId, playerName)
+    },
+    [handleAssignPlayer, formationSaving],
+  )
+
+  const handleBenchDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      if (formationSaving) {
+        return
+      }
+      const slotId = event.dataTransfer.getData(SLOT_DATA_KEY)
+      if (slotId) {
+        void handleClearSlot(slotId)
+      }
+    },
+    [handleClearSlot, formationSaving],
+  )
+
+  const handleResetFormation = useCallback(async () => {
+    setFormationSaving(true)
+    setFormationError('')
+    try {
+      await resetFormationAssignments()
+      const resetSlots = FORMATION_TEMPLATE.map((slot) => ({ ...slot, player: null }))
+      setFormationSlots(resetSlots)
+      updateBenchPlayers(resetSlots)
+    } catch (error) {
+      console.error(error)
+      if (error instanceof Error) {
+        setFormationError(error.message)
+      } else {
+        setFormationError('포메이션을 초기화하는 중 알 수 없는 오류가 발생했습니다.')
+      }
+      void loadFormation()
+    } finally {
+      setFormationSaving(false)
+    }
+  }, [loadFormation, updateBenchPlayers])
 
   const handleFetchAttendanceKing = async () => {
     if (!supabaseReady) {
@@ -437,6 +653,132 @@ function App() {
           </button>
         )}
       </section>
+
+      {attendeeNames.length > 0 && (
+        <section className={`formation-card ${showFormation ? 'open' : ''}`}>
+          <div className="formation-header">
+            <div>
+              <h2>포메이션 배치</h2>
+              <p className="formation-caption">
+                출석한 {attendeeNames.length}명을 드래그해 원하는 포지션에 배치하세요. 더블클릭하면 자리에서
+                제거됩니다.
+              </p>
+            </div>
+            <div className="formation-actions">
+              {showFormation && (
+                <button
+                  className="formation-action secondary"
+                  type="button"
+                  onClick={handleResetFormation}
+                  disabled={formationSaving || formationLoading}
+                >
+                  초기화
+                </button>
+              )}
+              <button
+                className="formation-action primary"
+                type="button"
+                disabled={formationSaving || formationLoading}
+                onClick={() =>
+                  setShowFormation((prev) => {
+                    const next = !prev
+                    if (!prev) {
+                      void loadFormation()
+                    }
+                    return next
+                  })
+                }
+              >
+                {showFormation ? '포메이션 닫기' : '포메이션 열기'}
+              </button>
+            </div>
+          </div>
+          {(formationLoading || formationError || formationSaving) && (
+            <p className={`formation-info ${formationError ? 'error' : ''}`}>
+              {formationError
+                ? formationError
+                : formationSaving
+                  ? '포지션 변경 내용을 저장하는 중입니다...'
+                  : '포메이션 정보를 불러오는 중입니다...'}
+            </p>
+          )}
+
+          {showFormation && (
+            <div className="formation-content">
+              <div
+                className="formation-bench"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={handleBenchDrop}
+              >
+                <h3>대기 명단</h3>
+                {benchPlayers.length === 0 ? (
+                  <p className="bench-empty">대기 중인 선수가 없습니다.</p>
+                ) : (
+                  <div className="bench-list">
+                    {benchPlayers.map((name) => (
+                      <div
+                        key={name}
+                        className="bench-player"
+                        draggable={!formationSaving}
+                        onDragStart={(event) => {
+                          if (formationSaving) return
+                          handlePlayerDragStart(event, name)
+                        }}
+                        aria-disabled={formationSaving}
+                      >
+                        {name}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="bench-hint">포지션으로 드래그하거나 자리에서 드래그해 대기 명단으로 돌려놓을 수 있습니다.</p>
+              </div>
+
+              <div className="formation-field">
+                {formationSlots.map((slot) => {
+                  const assignedPlayer = slot.player
+                  const isActivePlayer = assignedPlayer ? attendeeNames.includes(assignedPlayer) : false
+                  return (
+                    <div
+                      key={slot.id}
+                      className={`formation-slot ${assignedPlayer ? 'filled' : ''} ${
+                        assignedPlayer && !isActivePlayer ? 'absent' : ''
+                      }`}
+                      style={{ gridColumn: slot.column, gridRow: slot.row }}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => handleSlotDrop(event, slot.id)}
+                    >
+                      <span className="formation-slot-label">{slot.label}</span>
+                      {assignedPlayer ? (
+                        <div className="formation-player-wrapper">
+                          <button
+                            type="button"
+                            className="formation-player"
+                            draggable={!formationSaving}
+                            onDragStart={(event) => {
+                              if (formationSaving) return
+                              handlePlayerDragStart(event, assignedPlayer, slot.id)
+                            }}
+                            onDoubleClick={() => {
+                              void handleClearSlot(slot.id)
+                            }}
+                            aria-disabled={formationSaving}
+                          >
+                            {assignedPlayer}
+                          </button>
+                          {!isActivePlayer && <span className="formation-tag">미출석</span>}
+                        </div>
+                      ) : (
+                        <span className="formation-placeholder">드래그하여 배치</span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="list">
         <div className="list-header">

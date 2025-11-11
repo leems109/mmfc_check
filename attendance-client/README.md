@@ -14,9 +14,16 @@ Supabase에 출석 정보를 저장하는 간단한 React + Vite 애플리케이
    - `is_active` : boolean, default `false`
    - `updated_at` : timestamptz, default `now()` (선택)
    - 초기 데이터로 `id = 1`, `is_active = false` 행을 하나 넣어둡니다.
-4. 위 두 테이블에 대해 `anon` 키로 `select`, `insert`(`mmfc_check`), `upsert`(`mmfc_admin_gate`)가 가능하도록 RLS 정책을 추가합니다.
-5. Supabase 프로젝트 설정 → `API` 탭에서 `Project URL`과 `anon public` 키를 확인합니다.
-6. 프로젝트 루트에 `.env` 파일을 만들고 값을 입력합니다.
+4. `mmfc_formation` 테이블을 생성합니다. (포지션 배치 저장)
+   - `slot_id` : text, Primary Key
+   - `player_name` : text, nullable
+   - `updated_at` : timestamptz, default `now()` (선택)
+5. 위 세 테이블에 대해 `anon` 키로 필요한 작업이 가능하도록 RLS 정책을 추가합니다.
+   - `mmfc_check`: `select`, `insert`
+   - `mmfc_admin_gate`: `select`, `upsert`/`update`
+   - `mmfc_formation`: `select`, `upsert`, `delete`
+6. Supabase 프로젝트 설정 → `API` 탭에서 `Project URL`과 `anon public` 키를 확인합니다.
+7. 프로젝트 루트에 `.env` 파일을 만들고 값을 입력합니다.
    ```
    VITE_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
    VITE_SUPABASE_ANON_KEY=your-public-anon-key

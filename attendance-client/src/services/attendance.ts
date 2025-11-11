@@ -9,6 +9,11 @@ export type CheckInRecord = {
   created_at: string
 }
 
+export type FormationAssignment = {
+  slot_id: string
+  player_name: string | null
+}
+
 export async function checkIn({ userName }: CheckInPayload) {
   if (!supabase) {
     throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
@@ -76,6 +81,59 @@ export async function updateGateState(isActive: boolean): Promise<void> {
 
   if (error) {
     throw new Error(error.message ?? '출석 허용 상태를 저장하는 중 오류가 발생했습니다.')
+  }
+}
+
+export async function fetchFormationAssignments(): Promise<FormationAssignment[]> {
+  if (!supabase) {
+    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
+  }
+
+  const { data, error } = await supabase
+    .from('mmfc_formation')
+    .select('slot_id, player_name')
+
+  if (error) {
+    throw new Error(error.message ?? '포메이션 정보를 불러오는 중 오류가 발생했습니다.')
+  }
+
+  return data ?? []
+}
+
+export async function upsertFormationAssignment(
+  slotId: string,
+  playerName: string | null,
+): Promise<void> {
+  if (!supabase) {
+    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
+  }
+
+  if (!playerName) {
+    const { error } = await supabase.from('mmfc_formation').delete().eq('slot_id', slotId)
+    if (error) {
+      throw new Error(error.message ?? '포지션에서 선수를 제거하는 중 오류가 발생했습니다.')
+    }
+    return
+  }
+
+  const { error } = await supabase
+    .from('mmfc_formation')
+    .upsert({ slot_id: slotId, player_name: playerName }, { onConflict: 'slot_id' })
+
+  if (error) {
+    throw new Error(error.message ?? '포지션에 선수를 배치하는 중 오류가 발생했습니다.')
+  }
+}
+
+export async function resetFormationAssignments(): Promise<void> {
+  if (!supabase) {
+    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
+  }
+
+  const { error } = await supabase.from('mmfc_formation').delete().neq('slot_id', '')
+
+  if (error) {
+    throw new Error(error.message ?? '포메이션을 초기화하는 중 오류가 발생했습니다.')
   }
 }
 
