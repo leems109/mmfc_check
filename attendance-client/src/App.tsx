@@ -1,16 +1,74 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
-import { checkIn } from './services/attendance'
+import { checkIn, fetchTodayCheckIns, type CheckInRecord } from './services/attendance'
+
+const ADMIN_CREDENTIALS = {
+  username: 'admin',
+  password: 'mmfc1234',
+}
 
 function App() {
   const [userName, setUserName] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [errorMessage, setErrorMessage] = useState('')
+  const [checkIns, setCheckIns] = useState<CheckInRecord[]>([])
+  const [listError, setListError] = useState('')
+  const [listLoading, setListLoading] = useState(false)
+  const [adminId, setAdminId] = useState('')
+  const [adminPassword, setAdminPassword] = useState('')
+  const [isAdminAuthed, setIsAdminAuthed] = useState(false)
+  const [adminError, setAdminError] = useState('')
 
   const supabaseReady = useMemo(() => {
     return Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
   }, [])
+
+  const todayLabel = useMemo(() => {
+    return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'full' }).format(new Date())
+  }, [])
+
+  const timeFormatter = useMemo(() => {
+    return new Intl.DateTimeFormat('ko-KR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
+  }, [])
+
+  const loadTodayCheckIns = useCallback(async () => {
+    if (!supabaseReady) {
+      return
+    }
+
+    setListLoading(true)
+    setListError('')
+    try {
+      const data = await fetchTodayCheckIns()
+      const deduped = data.reduce<CheckInRecord[]>((acc, current) => {
+        const existing = acc.find((item) => item.name === current.name)
+        if (!existing) {
+          acc.push(current)
+        }
+        return acc
+      }, [])
+      setCheckIns(deduped)
+    } catch (error: unknown) {
+      console.error(error)
+      if (error instanceof Error) {
+        setListError(error.message)
+      } else {
+        setListError('출석 목록을 불러오는 중 오류가 발생했습니다.')
+      }
+    } finally {
+      setListLoading(false)
+    }
+  }, [supabaseReady])
+
+  useEffect(() => {
+    void loadTodayCheckIns()
+  }, [loadTodayCheckIns])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -28,6 +86,12 @@ function App() {
       return
     }
 
+    if (!isAdminAuthed) {
+      setErrorMessage('관리자 인증 후 출석을 저장할 수 있습니다.')
+      setStatus('error')
+      return
+    }
+
     setStatus('loading')
     setErrorMessage('')
 
@@ -35,6 +99,7 @@ function App() {
       await checkIn({ userName: trimmedName })
       setStatus('success')
       setUserName('')
+      await loadTodayCheckIns()
     } catch (error: unknown) {
       console.error(error)
       if (error instanceof Error) {
@@ -46,11 +111,37 @@ function App() {
     }
   }
 
+  const handleAdminLogin = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setAdminError('')
+
+    const trimmedId = adminId.trim()
+    const trimmedPw = adminPassword.trim()
+
+    if (!trimmedId || !trimmedPw) {
+      setAdminError('관리자 아이디와 비밀번호를 입력해주세요.')
+      return
+    }
+
+    if (
+      trimmedId === ADMIN_CREDENTIALS.username &&
+      trimmedPw === ADMIN_CREDENTIALS.password
+    ) {
+      setIsAdminAuthed(true)
+      setAdminId('')
+      setAdminPassword('')
+    } else {
+      setIsAdminAuthed(false)
+      setAdminError('관리자 인증에 실패했습니다.')
+    }
+  }
+
   return (
     <div className="container">
       <header className="header">
-        <h1>출석 체크</h1>
+        <h1>명문FC 출석 체크</h1>
         <p>이름과 현재 시간을 Supabase에 저장합니다.</p>
+        <p className="date">{todayLabel}</p>
       </header>
 
       <form className="form" onSubmit={handleSubmit}>
@@ -73,6 +164,42 @@ function App() {
         </button>
       </form>
 
+      {!isAdminAuthed && (
+        <form className="admin-form" onSubmit={handleAdminLogin}>
+          <h2>관리자 인증</h2>
+
+          <label className="label" htmlFor="adminId">
+            관리자 아이디
+          </label>
+          <input
+            id="adminId"
+            className="input"
+            value={adminId}
+            onChange={(event) => setAdminId(event.target.value)}
+            placeholder="admin"
+            autoComplete="username"
+          />
+
+          <label className="label" htmlFor="adminPassword">
+            비밀번호
+          </label>
+          <input
+            id="adminPassword"
+            className="input"
+            type="password"
+            value={adminPassword}
+            onChange={(event) => setAdminPassword(event.target.value)}
+            placeholder="********"
+            autoComplete="current-password"
+          />
+
+          <button className="button" type="submit">
+            관리자 로그인
+          </button>
+          {adminError && <p className="status-message error">{adminError}</p>}
+        </form>
+      )}
+
       <section className="status">
         {status === 'success' && (
           <p className="status-message success">출석이 저장되었습니다.</p>
@@ -83,6 +210,42 @@ function App() {
             Supabase 환경 변수를 설정하면 출석이 정상적으로 저장됩니다.
           </p>
         )}
+      </section>
+
+      <section className="list">
+        <div className="list-header">
+          <h2>오늘의 출석 목록</h2>
+          <button
+            className="list-refresh"
+            type="button"
+            onClick={() => void loadTodayCheckIns()}
+            disabled={listLoading}
+          >
+            {listLoading ? '새로고침 중...' : '새로고침'}
+          </button>
+        </div>
+
+        {listError && <p className="status-message error">{listError}</p>}
+
+        {!listError && checkIns.length === 0 && !listLoading && (
+          <p className="list-empty">오늘 저장된 출석이 없습니다.</p>
+        )}
+
+        <ul className="list-items">
+          {checkIns.map((record, index) => {
+            const rawTime = record.created_at.slice(11, 19)
+            const displayTime = rawTime.includes(':')
+              ? rawTime
+              : timeFormatter.format(new Date(record.created_at))
+            return (
+              <li key={`${record.created_at}-${record.name}-${index}`} className="list-item">
+                <span className="list-item-order">{index + 1}</span>
+                <span className="list-item-name">{record.name}</span>
+                <span className="list-item-time">{displayTime}</span>
+              </li>
+            )
+          })}
+        </ul>
       </section>
     </div>
   )
