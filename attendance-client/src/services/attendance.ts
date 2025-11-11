@@ -28,21 +28,23 @@ export async function checkIn({ userName }: CheckInPayload) {
   }
 }
 
-export async function fetchTodayCheckIns(): Promise<CheckInRecord[]> {
+export async function fetchTodayCheckIns(date?: string): Promise<CheckInRecord[]> {
   if (!supabase) {
     throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
   }
 
-  const startOfToday = new Date()
-  startOfToday.setHours(0, 0, 0, 0)
-  const startOfTomorrow = new Date(startOfToday)
-  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1)
+  const baseDate = date ? new Date(date) : new Date()
+  const startOfDay = new Date(
+    Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate()),
+  )
+  const startOfNextDay = new Date(startOfDay)
+  startOfNextDay.setUTCDate(startOfNextDay.getUTCDate() + 1)
 
   const { data, error } = await supabase
     .from('mmfc_check')
     .select('name, created_at')
-    .gte('created_at', startOfToday.toISOString())
-    .lt('created_at', startOfTomorrow.toISOString())
+    .gte('created_at', startOfDay.toISOString())
+    .lt('created_at', startOfNextDay.toISOString())
     .order('created_at', { ascending: true })
 
   if (error) {

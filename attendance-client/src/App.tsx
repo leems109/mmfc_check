@@ -49,6 +49,11 @@ const ADMIN_CREDENTIALS = {
   password: 'mmfc1234',
 }
 
+const toLocalDateString = (date: Date) =>
+  new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 10)
+
 function App() {
   const [userName, setUserName] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
@@ -82,6 +87,7 @@ function App() {
   const [kingResult, setKingResult] = useState<{ name: string; count: number } | null>(null)
   const [kingLoading, setKingLoading] = useState(false)
   const [kingError, setKingError] = useState('')
+  const [selectedDate, setSelectedDate] = useState(() => toLocalDateString(new Date()))
 
   const supabaseReady = useMemo(() => {
     return Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
@@ -129,34 +135,37 @@ function App() {
     }
   }, [supabaseReady])
 
-  const loadTodayCheckIns = useCallback(async () => {
-    if (!supabaseReady) {
-      return
-    }
-
-    setListLoading(true)
-    setListError('')
-    try {
-      const data = await fetchTodayCheckIns()
-      const deduped = data.reduce<CheckInRecord[]>((acc, current) => {
-        const existing = acc.find((item) => item.name === current.name)
-        if (!existing) {
-          acc.push(current)
-        }
-        return acc
-      }, [])
-      setCheckIns(deduped)
-    } catch (error: unknown) {
-      console.error(error)
-      if (error instanceof Error) {
-        setListError(error.message)
-      } else {
-        setListError('출석 목록을 불러오는 중 오류가 발생했습니다.')
+  const loadCheckInsByDate = useCallback(
+    async (date: string) => {
+      if (!supabaseReady) {
+        return
       }
-    } finally {
-      setListLoading(false)
-    }
-  }, [supabaseReady])
+
+      setListLoading(true)
+      setListError('')
+      try {
+        const data = await fetchTodayCheckIns(date)
+        const deduped = data.reduce<CheckInRecord[]>((acc, current) => {
+          const existing = acc.find((item) => item.name === current.name)
+          if (!existing) {
+            acc.push(current)
+          }
+          return acc
+        }, [])
+        setCheckIns(deduped)
+      } catch (error: unknown) {
+        console.error(error)
+        if (error instanceof Error) {
+          setListError(error.message)
+        } else {
+          setListError('출석 목록을 불러오는 중 오류가 발생했습니다.')
+        }
+      } finally {
+        setListLoading(false)
+      }
+    },
+    [supabaseReady],
+  )
 
   useEffect(() => {
     void loadGateState()
@@ -178,8 +187,8 @@ function App() {
   }, [isGateOpen, isAdminAuthed])
 
   useEffect(() => {
-    void loadTodayCheckIns()
-  }, [loadTodayCheckIns])
+    void loadCheckInsByDate(selectedDate)
+  }, [loadCheckInsByDate, selectedDate])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -210,7 +219,7 @@ function App() {
       await checkIn({ userName: trimmedName })
       setStatus('success')
       setUserName('')
-      await loadTodayCheckIns()
+      await loadCheckInsByDate(selectedDate)
     } catch (error: unknown) {
       console.error(error)
       if (error instanceof Error) {
@@ -670,8 +679,7 @@ function App() {
             <div>
               <h2>포메이션 배치</h2>
               <p className="formation-caption">
-                출석한 {attendeeNames.length}명을 드래그해 원하는 포지션에 배치하세요. 더블클릭하면 자리에서
-                제거됩니다.
+                출석한 {attendeeNames.length}명을 원하는 포지션에 배치하세요.
               </p>
             </div>
             <div className="formation-actions">
@@ -814,21 +822,34 @@ function App() {
 
       <section className="list">
         <div className="list-header">
-          <h2>오늘의 출석 목록</h2>
-          <button
-            className="list-refresh"
-            type="button"
-            onClick={() => void loadTodayCheckIns()}
-            disabled={listLoading}
-          >
-            {listLoading ? '새로고침 중...' : '새로고침'}
-          </button>
+          <div>
+            <h2>출석 목록</h2>
+          </div>
+          <div className="list-controls">
+            <input
+              type="date"
+              className="date-input"
+              value={selectedDate}
+              onChange={(event) => setSelectedDate(event.target.value)}
+              disabled={listLoading}
+            />
+            <button
+              className="list-refresh"
+              type="button"
+              onClick={() => void loadCheckInsByDate(selectedDate)}
+              disabled={listLoading}
+            >
+              {listLoading ? '조회 중...' : '다시 조회'}
+            </button>
+          </div>
         </div>
 
         {listError && <p className="status-message error">{listError}</p>}
 
         {!listError && checkIns.length === 0 && !listLoading && (
-          <p className="list-empty">오늘 저장된 출석이 없습니다.</p>
+          <p className="list-empty">
+            {`${selectedDate} 날짜에 저장된 출석이 없습니다.`}
+          </p>
         )}
 
         <ul className="list-items">
