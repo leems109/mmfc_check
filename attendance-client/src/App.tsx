@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import './App.css'
 import {
   checkIn,
+  fetchAttendanceByYear,
   fetchGateState,
   fetchTodayCheckIns,
   updateGateState,
@@ -29,6 +30,15 @@ function App() {
   const [isAdminAuthed, setIsAdminAuthed] = useState(false)
   const [adminError, setAdminError] = useState('')
   const [showAdminLogin, setShowAdminLogin] = useState(false)
+  const currentYear = new Date().getFullYear()
+  const yearOptions = useMemo(
+    () => Array.from({ length: 6 }, (_, index) => currentYear - index),
+    [currentYear],
+  )
+  const [selectedYear, setSelectedYear] = useState(currentYear)
+  const [kingResult, setKingResult] = useState<{ name: string; count: number } | null>(null)
+  const [kingLoading, setKingLoading] = useState(false)
+  const [kingError, setKingError] = useState('')
 
   const supabaseReady = useMemo(() => {
     return Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
@@ -191,6 +201,8 @@ function App() {
   const handleAdminLogout = () => {
     setIsAdminAuthed(false)
     setShowAdminLogin(!isGateOpen)
+    setKingResult(null)
+    setKingError('')
   }
 
   const handleGateToggle = async (open: boolean) => {
@@ -208,6 +220,63 @@ function App() {
       }
     } finally {
       setGateLoading(false)
+    }
+  }
+
+  const handleFetchAttendanceKing = async () => {
+    if (!supabaseReady) {
+      setKingError('Supabase 환경 변수가 설정되지 않았습니다.')
+      return
+    }
+
+    setKingLoading(true)
+    setKingError('')
+    setKingResult(null)
+
+    try {
+      const records = await fetchAttendanceByYear(selectedYear)
+      if (records.length === 0) {
+        setKingError(`${selectedYear}년에 저장된 출석 데이터가 없습니다.`)
+        return
+      }
+
+      const dailyAttendance = records.reduce<Record<string, Set<string>>>((acc, record) => {
+        const rawName = record.name?.trim()
+        if (!rawName) {
+          return acc
+        }
+        const name = rawName
+        const dateKey = record.created_at?.slice(0, 10)
+        if (!dateKey) {
+          return acc
+        }
+
+        if (!acc[name]) {
+          acc[name] = new Set<string>()
+        }
+        acc[name].add(dateKey)
+        return acc
+      }, {})
+
+      const sorted = Object.entries(dailyAttendance)
+        .map(([name, dates]) => ({ name, count: dates.size }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+
+      const top = sorted[0]
+      if (top) {
+        setKingResult(top)
+      } else {
+        setKingError(`${selectedYear}년에 출석 데이터가 없습니다.`)
+      }
+    } catch (error: unknown) {
+      console.error(error)
+      if (error instanceof Error) {
+        setKingError(error.message)
+      } else {
+        setKingError('출석왕 정보를 불러오는 중 알 수 없는 오류가 발생했습니다.')
+      }
+    } finally {
+      setKingLoading(false)
     }
   }
 
@@ -305,6 +374,42 @@ function App() {
             <button className="admin-button ghost" type="button" onClick={handleAdminLogout}>
               관리자 로그아웃
             </button>
+          </div>
+
+          <div className="admin-king">
+            <h3>출석왕 조회</h3>
+            <div className="king-controls">
+              <label htmlFor="kingYear" className="label">
+                연도 선택
+              </label>
+              <select
+                id="kingYear"
+                className="select"
+                value={selectedYear}
+                onChange={(event) => setSelectedYear(Number(event.target.value))}
+              >
+                {yearOptions.map((year) => (
+                  <option key={year} value={year}>
+                    {year}년
+                  </option>
+                ))}
+              </select>
+              <button
+                className="admin-button primary"
+                type="button"
+                onClick={() => void handleFetchAttendanceKing()}
+                disabled={kingLoading}
+              >
+                {kingLoading ? '조회 중...' : '출석왕 조회'}
+              </button>
+            </div>
+            {kingError && <p className="status-message error">{kingError}</p>}
+            {!kingError && kingResult && (
+              <div className="king-result">
+                <span className="king-name">{kingResult.name}</span>
+                <span className="king-count">{kingResult.count}회 출석</span>
+              </div>
+            )}
           </div>
         </section>
       )}

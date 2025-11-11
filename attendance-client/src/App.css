@@ -180,6 +180,64 @@
   cursor: not-allowed;
 }
 
+.select {
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  border: 1px solid #c7d2fe;
+  font-size: 1rem;
+  color: #1e1b4b;
+  background-color: #fff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.select:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+}
+
+.admin-king {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.admin-king h3 {
+  margin: 0;
+  color: #1e1b4b;
+  text-align: center;
+}
+
+.king-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  align-items: center;
+}
+
+.king-controls .label {
+  margin: 0;
+}
+
+.king-result {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  color: #312e81;
+}
+
+.king-name {
+  color: #4f46e5;
+}
+
+.king-count {
+  color: #0f172a;
+}
+
 .link-button {
   border: none;
   background: none;

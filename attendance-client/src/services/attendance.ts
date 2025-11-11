@@ -79,3 +79,24 @@ export async function updateGateState(isActive: boolean): Promise<void> {
   }
 }
 
+export async function fetchAttendanceByYear(year: number): Promise<CheckInRecord[]> {
+  if (!supabase) {
+    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
+  }
+
+  const startOfYear = new Date(Date.UTC(year, 0, 1))
+  const startOfNextYear = new Date(Date.UTC(year + 1, 0, 1))
+
+  const { data, error } = await supabase
+    .from('mmfc_check')
+    .select('name, created_at')
+    .gte('created_at', startOfYear.toISOString())
+    .lt('created_at', startOfNextYear.toISOString())
+
+  if (error) {
+    throw new Error(error.message ?? '연도별 출석 정보를 불러오는 중 오류가 발생했습니다.')
+  }
+
+  return data ?? []
+}
+
