@@ -30,11 +30,14 @@ export async function fetchTodayCheckIns(): Promise<CheckInRecord[]> {
 
   const startOfToday = new Date()
   startOfToday.setHours(0, 0, 0, 0)
+  const startOfTomorrow = new Date(startOfToday)
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1)
 
   const { data, error } = await supabase
     .from('mmfc_check')
     .select('name, created_at')
     .gte('created_at', startOfToday.toISOString())
+    .lt('created_at', startOfTomorrow.toISOString())
     .order('created_at', { ascending: true })
 
   if (error) {
