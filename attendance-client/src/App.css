@@ -715,3 +715,62 @@
   color: #312e81;
   text-align: right;
 }
+
+@media (max-width: 540px) {
+  #root {
+    padding: 2rem 1rem;
+  }
+
+  .container {
+    padding: 1.75rem 1.25rem;
+    gap: 1.5rem;
+  }
+
+  .formation-card {
+    padding: 1.25rem;
+    gap: 1.25rem;
+  }
+
+  .formation-caption,
+  .formation-info {
+    font-size: 0.85rem;
+  }
+
+  .formation-content {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .formation-field {
+    min-height: 300px;
+    padding: 1.25rem;
+  }
+
+  .bench-hint {
+    font-size: 0.8rem;
+  }
+
+  .list-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .list-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .date-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .list-refresh {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .list-items {
+    gap: 0.6rem;
+  }
+}
