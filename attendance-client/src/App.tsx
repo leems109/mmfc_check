@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { DragEvent, FormEvent } from 'react'
+import type { FormEvent } from 'react'
 import './App.css'
 import {
   checkIn,
@@ -24,6 +24,12 @@ type FormationSlotState = FormationSlot & {
   player: string | null
 }
 
+type SelectedPlayer = {
+  name: string
+  source: 'bench' | 'slot'
+  slotId?: string
+}
+
 const FORMATION_TEMPLATE: FormationSlot[] = [
   { id: 'slot-lw', label: 'LW', row: 1, column: 2 },
   { id: 'slot-st', label: 'ST', row: 1, column: 3 },
@@ -37,9 +43,6 @@ const FORMATION_TEMPLATE: FormationSlot[] = [
   { id: 'slot-rb', label: 'RB', row: 3, column: 5 },
   { id: 'slot-gk', label: 'GK', row: 4, column: 3 },
 ]
-
-const PLAYER_DATA_KEY = 'application/x-formation-player'
-const SLOT_DATA_KEY = 'application/x-formation-slot'
 
 const ADMIN_CREDENTIALS = {
   username: 'admin',
@@ -69,6 +72,7 @@ function App() {
   const [formationLoading, setFormationLoading] = useState(false)
   const [formationSaving, setFormationSaving] = useState(false)
   const [formationError, setFormationError] = useState('')
+  const [selectedPlayer, setSelectedPlayer] = useState<SelectedPlayer | null>(null)
   const currentYear = new Date().getFullYear()
   const yearOptions = useMemo(
     () => Array.from({ length: 6 }, (_, index) => currentYear - index),
@@ -279,6 +283,19 @@ function App() {
     [attendeeNames],
   )
 
+  useEffect(() => {
+    updateBenchPlayers(formationSlots)
+  }, [formationSlots, updateBenchPlayers, attendeeNames])
+
+  const handleSelectBenchPlayer = useCallback((playerName: string) => {
+    setSelectedPlayer((prev) => {
+      if (prev?.name === playerName && prev?.source === 'bench') {
+        return null
+      }
+      return { name: playerName, source: 'bench' }
+    })
+  }, [])
+
   const loadFormation = useCallback(async () => {
     if (!supabaseReady) {
       return
@@ -313,7 +330,7 @@ function App() {
   }, [loadFormation])
 
   const handleAssignPlayer = useCallback(
-    async (slotId: string, playerName: string) => {
+    async (slotId: string, playerName: string, sourceSlotId?: string) => {
       if (!attendeeNames.includes(playerName)) {
         return
       }
@@ -323,7 +340,10 @@ function App() {
           if (slot.id === slotId) {
             return { ...slot, player: playerName }
           }
-          if (slot.player === playerName && slot.id !== slotId) {
+          if (sourceSlotId && slot.id === sourceSlotId) {
+            return { ...slot, player: null }
+          }
+          if (slot.player === playerName && slot.id !== slotId && slot.id !== sourceSlotId) {
             return { ...slot, player: null }
           }
           return slot
@@ -335,6 +355,9 @@ function App() {
       setFormationError('')
       try {
         await upsertFormationAssignment(slotId, playerName)
+        if (sourceSlotId && sourceSlotId !== slotId) {
+          await upsertFormationAssignment(sourceSlotId, null)
+        }
       } catch (error) {
         console.error(error)
         if (error instanceof Error) {
@@ -378,44 +401,31 @@ function App() {
     [updateBenchPlayers, loadFormation],
   )
 
-  const handlePlayerDragStart = useCallback(
-    (event: DragEvent<HTMLElement>, playerName: string, slotId?: string) => {
-      event.dataTransfer.setData(PLAYER_DATA_KEY, playerName)
-      if (slotId) {
-        event.dataTransfer.setData(SLOT_DATA_KEY, slotId)
-      }
-      event.dataTransfer.effectAllowed = 'move'
-    },
-    [],
-  )
-
-  const handleSlotDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>, slotId: string) => {
-      event.preventDefault()
+  const handleSlotClick = useCallback(
+    (slotId: string) => {
       if (formationSaving) {
         return
       }
-      const playerName = event.dataTransfer.getData(PLAYER_DATA_KEY)
-      if (!playerName) {
-        return
-      }
-      void handleAssignPlayer(slotId, playerName)
-    },
-    [handleAssignPlayer, formationSaving],
-  )
+      setSelectedPlayer((prev) => {
+        const currentSlot = formationSlots.find((slot) => slot.id === slotId)
+        if (!prev) {
+          if (currentSlot?.player) {
+            return { name: currentSlot.player, source: 'slot', slotId }
+          }
+          return null
+        }
 
-  const handleBenchDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      event.preventDefault()
-      if (formationSaving) {
-        return
-      }
-      const slotId = event.dataTransfer.getData(SLOT_DATA_KEY)
-      if (slotId) {
-        void handleClearSlot(slotId)
-      }
+        const { name, source, slotId: sourceSlotId } = prev
+
+        if (source === 'slot' && sourceSlotId === slotId) {
+          return null
+        }
+
+        void handleAssignPlayer(slotId, name, source === 'slot' ? sourceSlotId : undefined)
+        return null
+      })
     },
-    [handleClearSlot, formationSaving],
+    [formationSaving, formationSlots, handleAssignPlayer],
   )
 
   const handleResetFormation = useCallback(async () => {
@@ -705,33 +715,33 @@ function App() {
 
           {showFormation && (
             <div className="formation-content">
-              <div
-                className="formation-bench"
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={handleBenchDrop}
-              >
+              <div className="formation-bench">
                 <h3>대기 명단</h3>
                 {benchPlayers.length === 0 ? (
                   <p className="bench-empty">대기 중인 선수가 없습니다.</p>
                 ) : (
                   <div className="bench-list">
                     {benchPlayers.map((name) => (
-                      <div
+                      <button
+                        type="button"
                         key={name}
-                        className="bench-player"
-                        draggable={!formationSaving}
-                        onDragStart={(event) => {
-                          if (formationSaving) return
-                          handlePlayerDragStart(event, name)
-                        }}
-                        aria-disabled={formationSaving}
+                        className={`bench-player ${
+                          selectedPlayer?.source === 'bench' && selectedPlayer.name === name
+                            ? 'selected'
+                            : ''
+                        }`}
+                        onClick={() => handleSelectBenchPlayer(name)}
+                        disabled={formationSaving}
                       >
                         {name}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
-                <p className="bench-hint">포지션으로 드래그하거나 자리에서 드래그해 대기 명단으로 돌려놓을 수 있습니다.</p>
+                <p className="bench-hint">
+                  선수를 선택한 뒤 원하는 포지션을 탭하세요. 이미 배치된 자리를 다시 탭하면 다른 위치로 이동시킬
+                  수 있습니다.
+                </p>
               </div>
 
               <div className="formation-field">
@@ -743,33 +753,55 @@ function App() {
                       key={slot.id}
                       className={`formation-slot ${assignedPlayer ? 'filled' : ''} ${
                         assignedPlayer && !isActivePlayer ? 'absent' : ''
+                      } ${
+                        selectedPlayer?.source === 'slot' && selectedPlayer.slotId === slot.id ? 'selected' : ''
                       }`}
                       style={{ gridColumn: slot.column, gridRow: slot.row }}
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={(event) => handleSlotDrop(event, slot.id)}
+                      onClick={() => handleSlotClick(slot.id)}
                     >
                       <span className="formation-slot-label">{slot.label}</span>
                       {assignedPlayer ? (
-                        <div className="formation-player-wrapper">
-                          <button
-                            type="button"
-                            className="formation-player"
-                            draggable={!formationSaving}
-                            onDragStart={(event) => {
-                              if (formationSaving) return
-                              handlePlayerDragStart(event, assignedPlayer, slot.id)
-                            }}
-                            onDoubleClick={() => {
-                              void handleClearSlot(slot.id)
-                            }}
-                            aria-disabled={formationSaving}
-                          >
-                            {assignedPlayer}
-                          </button>
+                        <div
+                          className={`formation-player-wrapper ${
+                            selectedPlayer?.source === 'slot' && selectedPlayer.slotId === slot.id ? 'active' : ''
+                          }`}
+                        >
+                          <div className="formation-player-name">{assignedPlayer}</div>
                           {!isActivePlayer && <span className="formation-tag">미출석</span>}
+                          <div className="formation-player-actions">
+                            <button
+                              type="button"
+                              className="formation-assign"
+                              disabled={formationSaving}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                setSelectedPlayer({ name: assignedPlayer, source: 'slot', slotId: slot.id })
+                              }}
+                            >
+                              {selectedPlayer?.source === 'slot' && selectedPlayer.slotId === slot.id
+                                ? '선택됨'
+                                : '이동 선택'}
+                            </button>
+                            <button
+                              type="button"
+                              className="formation-remove"
+                              disabled={formationSaving}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                void handleClearSlot(slot.id)
+                                setSelectedPlayer((prev) =>
+                                  prev?.source === 'slot' && prev.slotId === slot.id ? null : prev,
+                                )
+                              }}
+                            >
+                              비우기
+                            </button>
+                          </div>
                         </div>
                       ) : (
-                        <span className="formation-placeholder">드래그하여 배치</span>
+                        <span className="formation-placeholder">
+                          {selectedPlayer ? '선택한 선수를 배치하세요.' : '선수를 선택한 뒤 배치하세요.'}
+                        </span>
                       )}
                     </div>
                   )

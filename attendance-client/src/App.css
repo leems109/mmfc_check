@@ -351,19 +351,30 @@
 }
 
 .bench-player {
+  border: none;
   padding: 0.5rem 0.75rem;
   border-radius: 10px;
   background: #eef2ff;
   color: #312e81;
   text-align: center;
-  cursor: grab;
+  cursor: pointer;
   font-weight: 600;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
-.bench-player:active {
-  cursor: grabbing;
-  transform: scale(0.97);
+.bench-player:hover:not(:disabled) {
+  box-shadow: 0 8px 16px -12px rgba(79, 70, 229, 0.7);
+}
+
+.bench-player:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.bench-player.selected {
+  background: linear-gradient(135deg, #6366f1, #4338ca);
+  color: #fff;
+  box-shadow: 0 12px 24px -18px rgba(79, 70, 229, 0.8);
 }
 
 .formation-field {
@@ -402,6 +413,11 @@
   box-shadow: 0 10px 25px -15px rgba(15, 23, 42, 0.6);
 }
 
+.formation-slot.selected {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 30px -20px rgba(67, 56, 202, 0.7);
+}
+
 .formation-slot.absent {
   border-color: rgba(239, 68, 68, 0.7);
   background: rgba(254, 226, 226, 0.92);
@@ -422,6 +438,19 @@
   margin-top: 0.35rem;
 }
 
+.formation-player-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+  width: 100%;
+}
+
+.formation-player-wrapper.active {
+  transform: translateY(-2px);
+}
+
 .formation-player {
   padding: 0.4rem 0.6rem;
   border-radius: 999px;
@@ -429,19 +458,28 @@
   background: linear-gradient(135deg, #4f46e5, #4338ca);
   color: white;
   font-weight: 600;
-  cursor: grab;
+  cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.2s ease;
 }
 
+.formation-player:hover:not(:disabled) {
+  box-shadow: 0 12px 20px -16px rgba(67, 56, 202, 0.7);
+}
+
+.formation-player:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .formation-player:active {
-  cursor: grabbing;
-  transform: scale(0.96);
+  transform: scale(0.97);
 }
 
 .formation-placeholder {
   margin-top: 0.4rem;
   color: rgba(15, 23, 42, 0.75);
   font-size: 0.8rem;
+  text-align: center;
 }
 
 .formation-tag {
@@ -451,6 +489,44 @@
   background: rgba(220, 38, 38, 0.12);
   padding: 0.15rem 0.45rem;
   border-radius: 999px;
+}
+
+.formation-player-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.formation-player-actions button {
+  border: none;
+  border-radius: 10px;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.formation-player-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.formation-assign {
+  background: rgba(79, 70, 229, 0.12);
+  color: #312e81;
+}
+
+.formation-assign:hover:not(:disabled) {
+  background: rgba(79, 70, 229, 0.22);
+}
+
+.formation-remove {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.formation-remove:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.22);
 }
 
 .formation-field::before,
