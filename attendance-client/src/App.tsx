@@ -361,8 +361,8 @@ function App() {
             return (
               <li key={`${record.created_at}-${record.name}-${index}`} className="list-item">
                 <span className="list-item-order">{index + 1}</span>
-                <span className="list-item-name">{record.name}</span>
                 <span className="list-item-time">{displayTime}</span>
+                <span className="list-item-name">{record.name}</span>
               </li>
             )
           })}

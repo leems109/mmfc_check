@@ -35,7 +35,6 @@ export async function fetchTodayCheckIns(): Promise<CheckInRecord[]> {
     .from('mmfc_check')
     .select('name, created_at')
     .gte('created_at', startOfToday.toISOString())
-    .order('name', { ascending: true })
     .order('created_at', { ascending: true })
 
   if (error) {
