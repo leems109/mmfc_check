@@ -4,7 +4,7 @@ import './App.css'
 import { checkIn } from './services/attendance'
 
 function App() {
-  const [phoneNumber, setPhoneNumber] = useState('')
+  const [userName, setUserName] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [errorMessage, setErrorMessage] = useState('')
 
@@ -15,9 +15,9 @@ function App() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
-    const trimmedNumber = phoneNumber.trim()
-    if (!trimmedNumber) {
-      setErrorMessage('휴대폰 번호를 입력해주세요.')
+    const trimmedName = userName.trim()
+    if (!trimmedName) {
+      setErrorMessage('이름을 입력해주세요.')
       setStatus('error')
       return
     }
@@ -32,9 +32,9 @@ function App() {
     setErrorMessage('')
 
     try {
-      await checkIn({ phoneNumber: trimmedNumber })
+      await checkIn({ userName: trimmedName })
       setStatus('success')
-      setPhoneNumber('')
+      setUserName('')
     } catch (error: unknown) {
       console.error(error)
       if (error instanceof Error) {
@@ -50,21 +50,21 @@ function App() {
     <div className="container">
       <header className="header">
         <h1>출석 체크</h1>
-        <p>휴대폰 번호와 현재 시간을 Supabase에 저장합니다.</p>
+        <p>이름과 현재 시간을 Supabase에 저장합니다.</p>
       </header>
 
       <form className="form" onSubmit={handleSubmit}>
-        <label className="label" htmlFor="phoneNumber">
-          휴대폰 번호
+        <label className="label" htmlFor="userName">
+          이름
         </label>
         <input
-          id="phoneNumber"
+          id="userName"
           className="input"
-          type="tel"
-          value={phoneNumber}
-          onChange={(event) => setPhoneNumber(event.target.value)}
-          placeholder="010-1234-5678"
-          autoComplete="tel"
+          type="text"
+          value={userName}
+          onChange={(event) => setUserName(event.target.value)}
+          placeholder="홍길동"
+          autoComplete="name"
           disabled={status === 'loading'}
         />
 
