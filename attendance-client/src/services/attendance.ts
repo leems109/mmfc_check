@@ -12,6 +12,8 @@ export type CheckInRecord = {
 export type FormationAssignment = {
   slot_id: string
   player_name: string | null
+  day_key: string
+  quarter: number
 }
 
 export async function checkIn({ userName }: CheckInPayload) {
@@ -51,7 +53,63 @@ export async function fetchTodayCheckIns(date?: string): Promise<CheckInRecord[]
     throw new Error(error.message ?? 'Supabase 조회 중 오류가 발생했습니다.')
   }
 
-  return data ?? []
+  return (data ?? []) as CheckInRecord[]
+}
+
+export async function deleteCheckIn(name: string, dayKey: string): Promise<void> {
+  if (!supabase) {
+    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
+  }
+
+  if (!/^\d{8}$/.test(dayKey)) {
+    throw new Error('삭제할 날짜 형식이 올바르지 않습니다. (예: 20251111)')
+  }
+
+  const year = Number(dayKey.slice(0, 4))
+  const month = Number(dayKey.slice(4, 6)) - 1
+  const day = Number(dayKey.slice(6, 8))
+
+  const localStart = new Date(year, month, day, 0, 0, 0)
+  const startOfDay = new Date(localStart.getTime() - localStart.getTimezoneOffset() * 60000)
+  const startOfNextDay = new Date(startOfDay)
+  startOfNextDay.setUTCDate(startOfNextDay.getUTCDate() + 1)
+
+  console.log('[deleteCheckIn] range', {
+    name,
+    dayKey,
+    start: startOfDay.toISOString(),
+    end: startOfNextDay.toISOString(),
+  })
+
+  const { data, error } = await supabase
+    .from('mmfc_check')
+    .select('created_at')
+    .eq('name', name)
+    .gte('created_at', startOfDay.toISOString())
+    .lt('created_at', startOfNextDay.toISOString())
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message ?? '삭제할 출석 기록을 조회하는 중 오류가 발생했습니다.')
+  }
+
+  if (!data) {
+    throw new Error('해당 날짜에 일치하는 출석 기록이 없습니다.')
+  }
+
+  console.log('[deleteCheckIn] deleting', { name, created_at: data.created_at })
+
+  const { error: deleteError } = await supabase
+    .from('mmfc_check')
+    .delete()
+    .eq('name', name)
+    .eq('created_at', data.created_at)
+
+  if (deleteError) {
+    throw new Error(deleteError.message ?? '출석 정보를 삭제하는 중 오류가 발생했습니다.')
+  }
 }
 
 export async function fetchGateState(): Promise<boolean> {
@@ -86,14 +144,19 @@ export async function updateGateState(isActive: boolean): Promise<void> {
   }
 }
 
-export async function fetchFormationAssignments(): Promise<FormationAssignment[]> {
+export async function fetchFormationAssignments(
+  dayKey: string,
+  quarter: number,
+): Promise<FormationAssignment[]> {
   if (!supabase) {
     throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
   }
 
   const { data, error } = await supabase
     .from('mmfc_formation')
-    .select('slot_id, player_name')
+    .select('slot_id, player_name, day_key, quarter')
+    .eq('day_key', dayKey)
+    .eq('quarter', quarter)
 
   if (error) {
     throw new Error(error.message ?? '포메이션 정보를 불러오는 중 오류가 발생했습니다.')
@@ -105,13 +168,21 @@ export async function fetchFormationAssignments(): Promise<FormationAssignment[]
 export async function upsertFormationAssignment(
   slotId: string,
   playerName: string | null,
+  dayKey: string,
+  quarter: number,
 ): Promise<void> {
   if (!supabase) {
     throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
   }
 
   if (!playerName) {
-    const { error } = await supabase.from('mmfc_formation').delete().eq('slot_id', slotId)
+    const { error } = await supabase
+      .from('mmfc_formation')
+      .delete()
+      .eq('slot_id', slotId)
+      .eq('day_key', dayKey)
+      .eq('quarter', quarter)
+
     if (error) {
       throw new Error(error.message ?? '포지션에서 선수를 제거하는 중 오류가 발생했습니다.')
     }
@@ -120,19 +191,26 @@ export async function upsertFormationAssignment(
 
   const { error } = await supabase
     .from('mmfc_formation')
-    .upsert({ slot_id: slotId, player_name: playerName }, { onConflict: 'slot_id' })
+    .upsert(
+      { slot_id: slotId, player_name: playerName, day_key: dayKey, quarter },
+      { onConflict: 'slot_id,day_key,quarter' },
+    )
 
   if (error) {
     throw new Error(error.message ?? '포지션에 선수를 배치하는 중 오류가 발생했습니다.')
   }
 }
 
-export async function resetFormationAssignments(): Promise<void> {
+export async function resetFormationAssignments(dayKey: string, quarter: number): Promise<void> {
   if (!supabase) {
     throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
   }
 
-  const { error } = await supabase.from('mmfc_formation').delete().neq('slot_id', '')
+  const { error } = await supabase
+    .from('mmfc_formation')
+    .delete()
+    .eq('day_key', dayKey)
+    .eq('quarter', quarter)
 
   if (error) {
     throw new Error(error.message ?? '포메이션을 초기화하는 중 오류가 발생했습니다.')
@@ -155,6 +233,25 @@ export async function fetchAttendanceByYear(year: number): Promise<CheckInRecord
 
   if (error) {
     throw new Error(error.message ?? '연도별 출석 정보를 불러오는 중 오류가 발생했습니다.')
+  }
+
+  return (data ?? []) as CheckInRecord[]
+}
+
+export async function fetchFormationAssignmentsByDay(
+  dayKey: string,
+): Promise<FormationAssignment[]> {
+  if (!supabase) {
+    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
+  }
+
+  const { data, error } = await supabase
+    .from('mmfc_formation')
+    .select('slot_id, player_name, day_key, quarter')
+    .eq('day_key', dayKey)
+
+  if (error) {
+    throw new Error(error.message ?? '포메이션 정보를 불러오는 중 오류가 발생했습니다.')
   }
 
   return data ?? []

@@ -45,3 +45,46 @@ npm run dev
 3. 호스팅 서비스의 환경 변수 설정에 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` 값을 등록합니다.
 
 배포 후 사용자는 이름을 입력하고 `출석 저장` 버튼을 눌러 Supabase 테이블에 출석 기록을 남길 수 있습니다.
+
+### `mmfc_formation`
+
+포메이션 배치를 저장하는 테이블입니다. 같은 선수가 여러 날짜/쿼터에 배정될 수 있도록 `slot_id`, `day_key`, `quarter`를 합친 복합 키를 사용합니다.
+
+```sql
+create table if not exists mmfc_formation (
+  slot_id text not null,
+  player_name text,
+  day_key text not null,
+  quarter int not null,
+  inserted_at timestamptz default now(),
+  primary key (slot_id, day_key, quarter)
+);
+```
+
+필요하다면 다음과 같이 RLS 정책을 추가합니다.
+
+```sql
+alter table mmfc_formation enable row level security;
+
+drop policy if exists "Allow select formation" on mmfc_formation;
+drop policy if exists "Allow upsert formation" on mmfc_formation;
+drop policy if exists "Allow delete formation" on mmfc_formation;
+
+create policy "Allow select formation" on mmfc_formation for select
+  using ( true );
+
+create policy "Allow upsert formation" on mmfc_formation for insert
+  with check ( true );
+
+create policy "Allow delete formation" on mmfc_formation for delete
+  using ( true );
+```
+
+> **업그레이드 메모**: 기존에 `slot_id`만 저장하고 있었다면 아래 쿼리로 컬럼을 추가해주세요.
+>
+> ```sql
+> alter table mmfc_formation add column if not exists day_key text default '19700101';
+> alter table mmfc_formation add column if not exists quarter int default 1;
+> alter table mmfc_formation alter column day_key drop default;
+> alter table mmfc_formation alter column quarter drop default;
+> ```

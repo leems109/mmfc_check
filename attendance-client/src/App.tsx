@@ -3,8 +3,10 @@ import type { FormEvent } from 'react'
 import './App.css'
 import {
   checkIn,
+  deleteCheckIn,
   fetchAttendanceByYear,
   fetchFormationAssignments,
+  fetchFormationAssignmentsByDay,
   fetchGateState,
   fetchTodayCheckIns,
   resetFormationAssignments,
@@ -34,14 +36,14 @@ const FORMATION_TEMPLATE: FormationSlot[] = [
   { id: 'slot-lw', label: 'LW', row: 1, column: 2 },
   { id: 'slot-st', label: 'ST', row: 1, column: 3 },
   { id: 'slot-rw', label: 'RW', row: 1, column: 4 },
-  { id: 'slot-lcm', label: 'LCM', row: 2, column: 2 },
-  { id: 'slot-cm', label: 'CM', row: 2, column: 3 },
-  { id: 'slot-rcm', label: 'RCM', row: 2, column: 4 },
-  { id: 'slot-lb', label: 'LB', row: 3, column: 1 },
-  { id: 'slot-lcb', label: 'LCB', row: 3, column: 2 },
-  { id: 'slot-rcb', label: 'RCB', row: 3, column: 4 },
-  { id: 'slot-rb', label: 'RB', row: 3, column: 5 },
-  { id: 'slot-gk', label: 'GK', row: 4, column: 3 },
+  { id: 'slot-cam', label: 'CAM', row: 2, column: 3 },
+  { id: 'slot-lcm', label: 'LCM', row: 3, column: 2 },
+  { id: 'slot-rcm', label: 'RCM', row: 3, column: 4 },
+  { id: 'slot-lb', label: 'LB', row: 4, column: 1 },
+  { id: 'slot-lcb', label: 'LCB', row: 4, column: 2 },
+  { id: 'slot-rcb', label: 'RCB', row: 4, column: 4 },
+  { id: 'slot-rb', label: 'RB', row: 4, column: 5 },
+  { id: 'slot-gk', label: 'GK', row: 5, column: 3 },
 ]
 
 const ADMIN_CREDENTIALS = {
@@ -78,6 +80,11 @@ function App() {
   const [formationSaving, setFormationSaving] = useState(false)
   const [formationError, setFormationError] = useState('')
   const [selectedPlayer, setSelectedPlayer] = useState<SelectedPlayer | null>(null)
+  const [formationDate, setFormationDate] = useState(() => toLocalDateString(new Date()))
+  const [formationQuarter, setFormationQuarter] = useState(1)
+  const [formationCounts, setFormationCounts] = useState<Record<string, number>>({})
+  const [selectedCheckName, setSelectedCheckName] = useState<string | null>(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const currentYear = new Date().getFullYear()
   const yearOptions = useMemo(
     () => Array.from({ length: 6 }, (_, index) => currentYear - index),
@@ -145,13 +152,20 @@ function App() {
       setListError('')
       try {
         const data = await fetchTodayCheckIns(date)
-        const deduped = data.reduce<CheckInRecord[]>((acc, current) => {
-          const existing = acc.find((item) => item.name === current.name)
-          if (!existing) {
-            acc.push(current)
+        const dedupMap = new Map<string, CheckInRecord>()
+        data.forEach((record) => {
+          const key = record.name?.trim()
+          if (!key) {
+            return
           }
-          return acc
-        }, [])
+          const existing = dedupMap.get(key)
+          if (!existing || new Date(record.created_at) < new Date(existing.created_at)) {
+            dedupMap.set(key, record)
+          }
+        })
+        const deduped = Array.from(dedupMap.values()).sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        )
         setCheckIns(deduped)
       } catch (error: unknown) {
         console.error(error)
@@ -190,6 +204,46 @@ function App() {
     void loadCheckInsByDate(selectedDate)
   }, [loadCheckInsByDate, selectedDate])
 
+  useEffect(() => {
+    setFormationDate(selectedDate)
+    setSelectedCheckName(null)
+  }, [selectedDate])
+
+  useEffect(() => {
+    setSelectedPlayer(null)
+  }, [formationDate, formationQuarter])
+
+  const refreshFormationCounts = useCallback(async () => {
+    if (!supabaseReady) {
+      return
+    }
+
+    const dayKey = selectedDate.replace(/-/g, '')
+    try {
+      const assignments = await fetchFormationAssignmentsByDay(dayKey)
+      const counts = assignments.reduce<Record<string, number>>((accumulator, assignment) => {
+        if (assignment.player_name) {
+          accumulator[assignment.player_name] =
+            (accumulator[assignment.player_name] ?? 0) + 1
+        }
+        return accumulator
+      }, {})
+      setFormationCounts(counts)
+    } catch (error) {
+      console.error(error)
+    }
+  }, [selectedDate, supabaseReady])
+
+  useEffect(() => {
+    void refreshFormationCounts()
+  }, [refreshFormationCounts])
+
+  useEffect(() => {
+    if (selectedCheckName && !checkIns.some((item) => item.name === selectedCheckName)) {
+      setSelectedCheckName(null)
+    }
+  }, [checkIns, selectedCheckName])
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
@@ -220,6 +274,7 @@ function App() {
       setStatus('success')
       setUserName('')
       await loadCheckInsByDate(selectedDate)
+      setSelectedCheckName(null)
     } catch (error: unknown) {
       console.error(error)
       if (error instanceof Error) {
@@ -312,7 +367,8 @@ function App() {
     setFormationLoading(true)
     setFormationError('')
     try {
-      const assignments = await fetchFormationAssignments()
+      const dayKey = formationDate.replace(/-/g, '')
+      const assignments = await fetchFormationAssignments(dayKey, formationQuarter)
       setFormationSlots(() => {
         const map = new Map(assignments.map((item) => [item.slot_id, item.player_name]))
         const nextSlots = FORMATION_TEMPLATE.map((slot) => ({
@@ -322,6 +378,9 @@ function App() {
         updateBenchPlayers(nextSlots)
         return nextSlots
       })
+      if (formationDate === selectedDate) {
+        await refreshFormationCounts()
+      }
     } catch (error) {
       console.error(error)
       if (error instanceof Error) {
@@ -332,7 +391,7 @@ function App() {
     } finally {
       setFormationLoading(false)
     }
-  }, [supabaseReady, updateBenchPlayers])
+  }, [formationDate, formationQuarter, refreshFormationCounts, selectedDate, supabaseReady, updateBenchPlayers])
 
   useEffect(() => {
     void loadFormation()
@@ -363,9 +422,13 @@ function App() {
       setFormationSaving(true)
       setFormationError('')
       try {
-        await upsertFormationAssignment(slotId, playerName)
+        const dayKey = formationDate.replace(/-/g, '')
+        await upsertFormationAssignment(slotId, playerName, dayKey, formationQuarter)
         if (sourceSlotId && sourceSlotId !== slotId) {
-          await upsertFormationAssignment(sourceSlotId, null)
+          await upsertFormationAssignment(sourceSlotId, null, dayKey, formationQuarter)
+        }
+        if (formationDate === selectedDate) {
+          await refreshFormationCounts()
         }
       } catch (error) {
         console.error(error)
@@ -379,7 +442,15 @@ function App() {
         setFormationSaving(false)
       }
     },
-    [attendeeNames, updateBenchPlayers, loadFormation],
+    [
+      attendeeNames,
+      formationDate,
+      formationQuarter,
+      loadFormation,
+      refreshFormationCounts,
+      selectedDate,
+      updateBenchPlayers,
+    ],
   )
 
   const handleClearSlot = useCallback(
@@ -394,7 +465,11 @@ function App() {
       setFormationSaving(true)
       setFormationError('')
       try {
-        await upsertFormationAssignment(slotId, null)
+        const dayKey = formationDate.replace(/-/g, '')
+        await upsertFormationAssignment(slotId, null, dayKey, formationQuarter)
+        if (formationDate === selectedDate) {
+          await refreshFormationCounts()
+        }
       } catch (error) {
         console.error(error)
         if (error instanceof Error) {
@@ -407,7 +482,14 @@ function App() {
         setFormationSaving(false)
       }
     },
-    [updateBenchPlayers, loadFormation],
+    [
+      formationDate,
+      formationQuarter,
+      loadFormation,
+      refreshFormationCounts,
+      selectedDate,
+      updateBenchPlayers,
+    ],
   )
 
   const handleSlotClick = useCallback(
@@ -441,10 +523,15 @@ function App() {
     setFormationSaving(true)
     setFormationError('')
     try {
-      await resetFormationAssignments()
+      const dayKey = formationDate.replace(/-/g, '')
+      await resetFormationAssignments(dayKey, formationQuarter)
       const resetSlots = FORMATION_TEMPLATE.map((slot) => ({ ...slot, player: null }))
       setFormationSlots(resetSlots)
       updateBenchPlayers(resetSlots)
+      if (formationDate === selectedDate) {
+        await refreshFormationCounts()
+      }
+      setSelectedPlayer(null)
     } catch (error) {
       console.error(error)
       if (error instanceof Error) {
@@ -456,7 +543,57 @@ function App() {
     } finally {
       setFormationSaving(false)
     }
-  }, [loadFormation, updateBenchPlayers])
+  }, [
+    formationDate,
+    formationQuarter,
+    loadFormation,
+    refreshFormationCounts,
+    selectedDate,
+    updateBenchPlayers,
+  ])
+
+  const handleSelectCheck = useCallback(
+    (name: string) => {
+      if (!isAdminAuthed) {
+        return
+      }
+      setSelectedCheckName((prev) => (prev === name ? null : name))
+    },
+    [isAdminAuthed],
+  )
+
+  const handleDeleteCheckIn = useCallback(
+    async (name: string) => {
+      if (!isAdminAuthed || !supabaseReady) {
+        return
+      }
+      const target = checkIns.find((item) => item.name === name)
+      const confirmMessage = target
+        ? `${toLocalDateString(new Date(target.created_at))} ${target.name} 출석 기록을 삭제할까요?`
+        : '선택한 출석 기록을 삭제할까요?'
+      if (!window.confirm(confirmMessage)) {
+        return
+      }
+      setDeleteLoading(true)
+      setListError('')
+      try {
+        const dayKey = selectedDate.replace(/-/g, '')
+        await deleteCheckIn(name, dayKey)
+        await loadCheckInsByDate(selectedDate)
+        setSelectedCheckName((prev) => (prev === name ? null : prev))
+      } catch (error: unknown) {
+        console.error(error)
+        if (error instanceof Error) {
+          setListError(error.message)
+        } else {
+          setListError('출석 정보를 삭제하는 중 오류가 발생했습니다.')
+        }
+      } finally {
+        setDeleteLoading(false)
+      }
+    },
+    [checkIns, isAdminAuthed, loadCheckInsByDate, selectedDate, supabaseReady],
+  )
 
   const handleFetchAttendanceKing = async () => {
     if (!supabaseReady) {
@@ -679,8 +816,25 @@ function App() {
             <div>
               <h2>포메이션 배치</h2>
               <p className="formation-caption">
-                출석한 {attendeeNames.length}명을 원하는 포지션에 배치하세요.
+                4-2-1-3 형태로 출석한 {attendeeNames.length}명을 원하는 포지션에 배치하세요.
               </p>
+            </div>
+            <div className="formation-controls">
+              <input
+                type="date"
+                className="date-input"
+                value={formationDate}
+                onChange={(event) => setFormationDate(event.target.value)}
+              />
+              <select
+                className="select formation-quarter"
+                value={formationQuarter}
+                onChange={(event) => setFormationQuarter(Number(event.target.value))}
+              >
+                {[1, 2, 3, 4, 5, 6].map((quarter) => (
+                  <option key={quarter} value={quarter}>{`${quarter}쿼터`}</option>
+                ))}
+              </select>
             </div>
             <div className="formation-actions">
               {showFormation && (
@@ -749,8 +903,8 @@ function App() {
                 <p className="bench-hint">
                   선수를 선택한 뒤 원하는 포지션을 탭하세요. 이미 배치된 자리를 다시 탭하면 다른 위치로 이동시킬
                   수 있습니다.
-                </p>
-              </div>
+        </p>
+      </div>
 
               <div className="formation-field">
                 {formationSlots.map((slot) => {
@@ -759,11 +913,7 @@ function App() {
                   return (
                     <div
                       key={slot.id}
-                      className={`formation-slot ${assignedPlayer ? 'filled' : ''} ${
-                        assignedPlayer && !isActivePlayer ? 'absent' : ''
-                      } ${
-                        selectedPlayer?.source === 'slot' && selectedPlayer.slotId === slot.id ? 'selected' : ''
-                      }`}
+                      className={`formation-slot ${assignedPlayer ? 'filled' : ''} ${assignedPlayer && !isActivePlayer ? 'absent' : ''} ${selectedPlayer?.source === 'slot' && selectedPlayer.slotId === slot.id ? 'selected' : ''}`}
                       style={{ gridColumn: slot.column, gridRow: slot.row }}
                       onClick={() => handleSlotClick(slot.id)}
                     >
@@ -858,11 +1008,33 @@ function App() {
             const displayTime = rawTime.includes(':')
               ? rawTime
               : timeFormatter.format(new Date(record.created_at))
+            const isSelected = isAdminAuthed && selectedCheckName === record.name
+            const formationCount = formationCounts[record.name] ?? 0
             return (
-              <li key={`${record.created_at}-${record.name}-${index}`} className="list-item">
+              <li
+                key={record.name}
+                className={`list-item ${isAdminAuthed ? 'admin' : ''} ${isSelected ? 'selected' : ''}`}
+                onClick={() => handleSelectCheck(record.name)}
+              >
                 <span className="list-item-order">{index + 1}</span>
                 <span className="list-item-time">{displayTime}</span>
-                <span className="list-item-name">{record.name}</span>
+                <span className="list-item-name">
+                  {record.name}
+                  {formationCount > 0 ? ` (${formationCount})` : ''}
+                </span>
+                {isAdminAuthed && (
+                  <button
+                    type="button"
+                    className="list-item-delete"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void handleDeleteCheckIn(record.name)
+                    }}
+                    disabled={deleteLoading}
+                  >
+                    삭제
+                  </button>
+                )}
               </li>
             )
           })}
