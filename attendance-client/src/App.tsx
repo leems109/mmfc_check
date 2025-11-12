@@ -403,13 +403,23 @@ function App() {
         return
       }
 
+      let targetPreviousPlayer: string | null = null
       setFormationSlots((prevSlots) => {
+        const targetSlot = prevSlots.find((slot) => slot.id === slotId)
+        targetPreviousPlayer = targetSlot?.player ?? null
+
         const updatedSlots = prevSlots.map((slot) => {
           if (slot.id === slotId) {
             return { ...slot, player: playerName }
           }
           if (sourceSlotId && slot.id === sourceSlotId) {
-            return { ...slot, player: null }
+            return {
+              ...slot,
+              player:
+                targetPreviousPlayer && targetPreviousPlayer !== playerName
+                  ? targetPreviousPlayer
+                  : null,
+            }
           }
           if (slot.player === playerName && slot.id !== slotId && slot.id !== sourceSlotId) {
             return { ...slot, player: null }
@@ -425,7 +435,16 @@ function App() {
         const dayKey = formationDate.replace(/-/g, '')
         await upsertFormationAssignment(slotId, playerName, dayKey, formationQuarter)
         if (sourceSlotId && sourceSlotId !== slotId) {
-          await upsertFormationAssignment(sourceSlotId, null, dayKey, formationQuarter)
+          if (targetPreviousPlayer && targetPreviousPlayer !== playerName) {
+            await upsertFormationAssignment(
+              sourceSlotId,
+              targetPreviousPlayer,
+              dayKey,
+              formationQuarter,
+            )
+          } else {
+            await upsertFormationAssignment(sourceSlotId, null, dayKey, formationQuarter)
+          }
         }
         if (formationDate === selectedDate) {
           await refreshFormationCounts()
@@ -497,26 +516,27 @@ function App() {
       if (formationSaving) {
         return
       }
-      setSelectedPlayer((prev) => {
-        const currentSlot = formationSlots.find((slot) => slot.id === slotId)
-        if (!prev) {
-          if (currentSlot?.player) {
-            return { name: currentSlot.player, source: 'slot', slotId }
-          }
-          return null
+
+      const currentSlot = formationSlots.find((slot) => slot.id === slotId)
+
+      if (!selectedPlayer) {
+        if (currentSlot?.player) {
+          setSelectedPlayer({ name: currentSlot.player, source: 'slot', slotId })
         }
+        return
+      }
 
-        const { name, source, slotId: sourceSlotId } = prev
+      const { name, source, slotId: sourceSlotId } = selectedPlayer
 
-        if (source === 'slot' && sourceSlotId === slotId) {
-          return null
-        }
+      if (source === 'slot' && sourceSlotId === slotId) {
+        setSelectedPlayer(null)
+        return
+      }
 
-        void handleAssignPlayer(slotId, name, source === 'slot' ? sourceSlotId : undefined)
-        return null
-      })
+      void handleAssignPlayer(slotId, name, source === 'slot' ? sourceSlotId : undefined)
+      setSelectedPlayer(null)
     },
-    [formationSaving, formationSlots, handleAssignPlayer],
+    [formationSaving, formationSlots, handleAssignPlayer, selectedPlayer],
   )
 
   const handleResetFormation = useCallback(async () => {
