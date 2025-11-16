@@ -894,15 +894,7 @@ function App() {
               </p>
             </div>
             <div className="formation-controls">
-              <select
-                className="select formation-type"
-                value={selectedFormation}
-                onChange={(event) => void handleFormationChange(event.target.value as FormationType)}
-                disabled={formationSaving || formationLoading}
-              >
-                <option value="442">4-4-2</option>
-                <option value="4231">4-2-3-1</option>
-              </select>
+              
               <input
                 type="date"
                 className="date-input"
@@ -920,6 +912,15 @@ function App() {
               </select>
             </div>
             <div className="formation-actions">
+            <select
+                className="select formation-type"
+                value={selectedFormation}
+                onChange={(event) => void handleFormationChange(event.target.value as FormationType)}
+                disabled={formationSaving || formationLoading}
+              >
+                <option value="442">4-4-2</option>
+                <option value="4231">4-2-3-1</option>
+              </select>
               {showFormation && (
                 <button
                   className="formation-action secondary"
