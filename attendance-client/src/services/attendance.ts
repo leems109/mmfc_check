@@ -257,3 +257,46 @@ export async function fetchFormationAssignmentsByDay(
   return data ?? []
 }
 
+export async function fetchFormationType(
+  dayKey: string,
+  quarter: number,
+): Promise<string | null> {
+  if (!supabase) {
+    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
+  }
+
+  const { data, error } = await supabase
+    .from('mmfc_formation_type')
+    .select('formation_type')
+    .eq('day_key', dayKey)
+    .eq('quarter', quarter)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message ?? '포메이션 타입을 불러오는 중 오류가 발생했습니다.')
+  }
+
+  return data?.formation_type ?? null
+}
+
+export async function upsertFormationType(
+  dayKey: string,
+  quarter: number,
+  formationType: string,
+): Promise<void> {
+  if (!supabase) {
+    throw new Error('Supabase 클라이언트가 초기화되지 않았습니다.')
+  }
+
+  const { error } = await supabase
+    .from('mmfc_formation_type')
+    .upsert(
+      { day_key: dayKey, quarter, formation_type: formationType },
+      { onConflict: 'day_key,quarter' },
+    )
+
+  if (error) {
+    throw new Error(error.message ?? '포메이션 타입을 저장하는 중 오류가 발생했습니다.')
+  }
+}
+

@@ -7,11 +7,13 @@ import {
   fetchAttendanceByYear,
   fetchFormationAssignments,
   fetchFormationAssignmentsByDay,
+  fetchFormationType,
   fetchGateState,
   fetchTodayCheckIns,
   resetFormationAssignments,
   updateGateState,
   upsertFormationAssignment,
+  upsertFormationType,
   type CheckInRecord,
 } from './services/attendance'
 
@@ -32,19 +34,36 @@ type SelectedPlayer = {
   slotId?: string
 }
 
-const FORMATION_TEMPLATE: FormationSlot[] = [
-  { id: 'slot-lw', label: 'LW', row: 1, column: 2 },
-  { id: 'slot-st', label: 'ST', row: 1, column: 3 },
-  { id: 'slot-rw', label: 'RW', row: 1, column: 4 },
-  { id: 'slot-cam', label: 'CAM', row: 2, column: 3 },
-  { id: 'slot-lcm', label: 'LCM', row: 3, column: 2 },
-  { id: 'slot-rcm', label: 'RCM', row: 3, column: 4 },
-  { id: 'slot-lb', label: 'LB', row: 4, column: 1 },
-  { id: 'slot-lcb', label: 'LCB', row: 4, column: 2 },
-  { id: 'slot-rcb', label: 'RCB', row: 4, column: 4 },
-  { id: 'slot-rb', label: 'RB', row: 4, column: 5 },
-  { id: 'slot-gk', label: 'GK', row: 5, column: 3 },
-]
+type FormationType = '442' | '4231'
+
+const FORMATION_TEMPLATES: Record<FormationType, FormationSlot[]> = {
+  '442': [
+    { id: 'slot-st1', label: 'ST', row: 1, column: 2 },
+    { id: 'slot-st2', label: 'ST', row: 1, column: 4 },
+    { id: 'slot-lm', label: 'LM', row: 2, column: 1 },
+    { id: 'slot-lcm', label: 'CM', row: 2, column: 2 },
+    { id: 'slot-rcm', label: 'CM', row: 2, column: 4 },
+    { id: 'slot-rm', label: 'RM', row: 2, column: 5 },
+    { id: 'slot-lb', label: 'LB', row: 3, column: 1 },
+    { id: 'slot-lcb', label: 'CB', row: 3, column: 2 },
+    { id: 'slot-rcb', label: 'CB', row: 3, column: 4 },
+    { id: 'slot-rb', label: 'RB', row: 3, column: 5 },
+    { id: 'slot-gk', label: 'GK', row: 4, column: 3 },
+  ],
+  '4231': [
+    { id: 'slot-st', label: 'ST', row: 1, column: 3 },
+    { id: 'slot-lw', label: 'LW', row: 2, column: 1 },
+    { id: 'slot-cam', label: 'CAM', row: 2, column: 3 },
+    { id: 'slot-rw', label: 'RW', row: 2, column: 5 },
+    { id: 'slot-lcdm', label: 'CDM', row: 3, column: 2 },
+    { id: 'slot-rcdm', label: 'CDM', row: 3, column: 4 },
+    { id: 'slot-lb', label: 'LB', row: 4, column: 1 },
+    { id: 'slot-lcb', label: 'CB', row: 4, column: 2 },
+    { id: 'slot-rcb', label: 'CB', row: 4, column: 4 },
+    { id: 'slot-rb', label: 'RB', row: 4, column: 5 },
+    { id: 'slot-gk', label: 'GK', row: 5, column: 3 },
+  ],
+}
 
 const ADMIN_CREDENTIALS = {
   username: 'admin',
@@ -71,8 +90,9 @@ function App() {
   const [isAdminAuthed, setIsAdminAuthed] = useState(false)
   const [adminError, setAdminError] = useState('')
   const [showAdminLogin, setShowAdminLogin] = useState(false)
+  const [selectedFormation, setSelectedFormation] = useState<FormationType>('442')
   const [formationSlots, setFormationSlots] = useState<FormationSlotState[]>(() =>
-    FORMATION_TEMPLATE.map((slot) => ({ ...slot, player: null })),
+    FORMATION_TEMPLATES['442'].map((slot) => ({ ...slot, player: null })),
   )
   const [benchPlayers, setBenchPlayers] = useState<string[]>([])
   const [showFormation, setShowFormation] = useState(false)
@@ -211,7 +231,23 @@ function App() {
 
   useEffect(() => {
     setSelectedPlayer(null)
-  }, [formationDate, formationQuarter])
+  }, [formationDate, formationQuarter, selectedFormation])
+
+  const handleFormationChange = useCallback(async (newFormation: FormationType) => {
+    setSelectedFormation(newFormation)
+    const template = FORMATION_TEMPLATES[newFormation]
+    setFormationSlots(template.map((slot) => ({ ...slot, player: null })))
+    setSelectedPlayer(null)
+    
+    if (supabaseReady) {
+      try {
+        const dayKey = formationDate.replace(/-/g, '')
+        await upsertFormationType(dayKey, formationQuarter, newFormation)
+      } catch (error) {
+        console.error('포메이션 타입 저장 실패:', error)
+      }
+    }
+  }, [formationDate, formationQuarter, supabaseReady])
 
   const refreshFormationCounts = useCallback(async () => {
     if (!supabaseReady) {
@@ -368,16 +404,32 @@ function App() {
     setFormationError('')
     try {
       const dayKey = formationDate.replace(/-/g, '')
-      const assignments = await fetchFormationAssignments(dayKey, formationQuarter)
+      const [assignments, savedFormationType] = await Promise.all([
+        fetchFormationAssignments(dayKey, formationQuarter),
+        fetchFormationType(dayKey, formationQuarter),
+      ])
+      
+      // 저장된 포메이션 타입이 있으면 사용, 없으면 기본값(442) 사용
+      const currentFormation: FormationType = 
+        (savedFormationType === '442' || savedFormationType === '4231') 
+          ? (savedFormationType as FormationType) 
+          : '442'
+      
+      // 포메이션 타입 설정
+      setSelectedFormation(currentFormation)
+      
+      // 슬롯 설정 (저장된 선수 배치 포함)
       setFormationSlots(() => {
         const map = new Map(assignments.map((item) => [item.slot_id, item.player_name]))
-        const nextSlots = FORMATION_TEMPLATE.map((slot) => ({
+        const template = FORMATION_TEMPLATES[currentFormation]
+        const nextSlots = template.map((slot) => ({
           ...slot,
           player: map.get(slot.id) ?? null,
         }))
         updateBenchPlayers(nextSlots)
         return nextSlots
       })
+      
       if (formationDate === selectedDate) {
         await refreshFormationCounts()
       }
@@ -507,6 +559,7 @@ function App() {
       loadFormation,
       refreshFormationCounts,
       selectedDate,
+      selectedFormation,
       updateBenchPlayers,
     ],
   )
@@ -545,7 +598,8 @@ function App() {
     try {
       const dayKey = formationDate.replace(/-/g, '')
       await resetFormationAssignments(dayKey, formationQuarter)
-      const resetSlots = FORMATION_TEMPLATE.map((slot) => ({ ...slot, player: null }))
+      const template = FORMATION_TEMPLATES[selectedFormation]
+      const resetSlots = template.map((slot) => ({ ...slot, player: null }))
       setFormationSlots(resetSlots)
       updateBenchPlayers(resetSlots)
       if (formationDate === selectedDate) {
@@ -836,10 +890,19 @@ function App() {
             <div>
               <h2>포메이션 배치</h2>
               <p className="formation-caption">
-                4-2-1-3 형태로 출석한 {attendeeNames.length}명을 원하는 포지션에 배치하세요.
+                {selectedFormation} 형태로 출석한 {attendeeNames.length}명을 원하는 포지션에 배치하세요.
               </p>
             </div>
             <div className="formation-controls">
+              <select
+                className="select formation-type"
+                value={selectedFormation}
+                onChange={(event) => void handleFormationChange(event.target.value as FormationType)}
+                disabled={formationSaving || formationLoading}
+              >
+                <option value="442">4-4-2</option>
+                <option value="4231">4-2-3-1</option>
+              </select>
               <input
                 type="date"
                 className="date-input"
